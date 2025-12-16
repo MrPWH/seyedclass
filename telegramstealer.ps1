@@ -1,8 +1,11 @@
+# نام کاربری فعلی ویندوز
+$UserName = $env:USERNAME
+
 # مسیر پوشه Telegram TData
-$SourceFolder = "C:\Users\YourUserName\AppData\Roaming\Telegram Desktop\tdata"
+$SourceFolder = "C:\Users\$UserName\AppData\Roaming\Telegram Desktop\tdata"
 
 # مسیر و نام فایل ZIP خروجی
-$DestinationZip = "F:\Backup\TelegramBackup.zip"
+$DestinationZip = "F:\TelegramBackup.zip"
 
 # فشرده‌سازی
 Compress-Archive -Path $SourceFolder -DestinationPath $DestinationZip -Force
